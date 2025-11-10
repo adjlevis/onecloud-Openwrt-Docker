@@ -9,8 +9,8 @@ on:
         default: '512'
       OP_author:
         description: '编译者名称'
-        required: false
-        default: 'GitHub Actions'
+        required: true
+        default: 'djkyc'
 
 jobs:
   build:
