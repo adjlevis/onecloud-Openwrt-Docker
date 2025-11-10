@@ -17,11 +17,8 @@ CONFIG_LUCI_LANG_zh_Hans=y
 EOF
 
 echo "🧰 写入旁路由网络配置到 files/etc/config/network..."
-
-# 创建文件结构
 mkdir -p files/etc/config
 
-# 写入自定义网络配置（静态 IP、关 DHCP）
 cat <<'NETCONF' > files/etc/config/network
 config interface 'loopback'
 	option ifname 'lo'
@@ -41,7 +38,6 @@ config interface 'lan'
 	option dns '192.168.2.1'
 NETCONF
 
-mkdir -p files/etc/config
 cat <<'DHCP' > files/etc/config/dhcp
 config dnsmasq
 	option domainneeded '1'
@@ -67,6 +63,6 @@ config odhcpd 'odhcpd'
 DHCP
 
 echo "✅ 已配置为旁路由模式 (IP=192.168.2.2 网关=192.168.2.1 DHCP=关闭)"
+echo "🚀 开始构建固件镜像..."
 
-# 开始构建镜像
 make image PROFILE=thunder-onecloud FILES=files
