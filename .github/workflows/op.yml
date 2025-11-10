@@ -1,16 +1,12 @@
-name: N1 OpenWRT Docker Build
+name: Onecloud OpenWRT RootFS Custom Build
 
 on:
   workflow_dispatch:
     inputs:
-      OP_rootfs:
-        description: 'RootFS 分区大小 (MB)'
-        required: false
-        default: '512'
       OP_author:
         description: '编译者名称'
         required: false
-        default: 'GitHub Actions'
+        default: 'djkyc'
 
 jobs:
   build:
@@ -20,38 +16,89 @@ jobs:
       - name: 🧾 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🧱 Ensure directories exist
+      - name: 🧱 Prepare directories
         run: |
           mkdir -p openwrt/bin openwrt/files release/openwrt
+          sudo chmod -R 777 openwrt/bin openwrt/files release/openwrt
 
-      - name: ⚙️ Prepare environment
+      - name: 📥 Download prebuilt rootfs
         working-directory: openwrt
         run: |
-          sed -i 's/\r$//' docker-build.sh build.sh || true
-          chmod +x docker-build.sh build.sh
-          sudo chmod -R 777 bin files
+          echo "📥 下载预构建 rootfs 文件..."
+          ROOTFS_URL="https://dl.openwrt.ai/releases/targets/amlogic/meson8b/kwrt-10.30.2025-amlogic-meson8b-thunder-onecloud-rootfs.tar.gz"
+          mkdir -p bin/rootfs
+          cd bin/rootfs
+          curl -LO "$ROOTFS_URL"
+          echo "✅ 下载完成：$(ls -lh)"
 
-      - name: 🐳 Pull OpenWRT ImageBuilder
-        run: docker pull openwrt/imagebuilder:armsr-armv7-openwrt-24.10
-
-      - name: 🏗️ Build firmware
+      - name: 📂 Extract rootfs and apply configs
         working-directory: openwrt
-        env:
-          OP_rootfs: ${{ github.event.inputs.OP_rootfs }}
-          OP_author: ${{ github.event.inputs.OP_author }}
-        run: ./docker-build.sh
-
-      - name: 📁 Package OpenWRT firmware
         run: |
-          mkdir -p release/openwrt
-          cp -r openwrt/bin/targets/armsr/armv7/* release/openwrt/ 2>/dev/null || cp -r openwrt/bin/* release/openwrt/ || true
-          echo "✅ release/openwrt 内容如下："
-          ls -R release/openwrt || true
+          echo "📂 解压 rootfs..."
+          mkdir -p files/
+          tar -xzf bin/rootfs/*.tar.gz -C files/ || true
+
+          echo "🧰 写入旁路由网络配置..."
+          mkdir -p files/etc/config
+
+          cat <<'NETCONF' > files/etc/config/network
+config interface 'lan'
+  option proto 'static'
+  option ipaddr '192.168.2.2'
+  option netmask '255.255.255.0'
+  option gateway '192.168.2.1'
+  option dns '192.168.2.1'
+NETCONF
+
+          cat <<'DHCP' > files/etc/config/dhcp
+config dhcp 'lan'
+  option ignore '1'
+DHCP
+
+          echo "✅ 覆盖配置完成。"
+
+      - name: 🔧 Package customized firmware
+        working-directory: openwrt
+        run: |
+          echo "🔧 打包固件..."
+          mkdir -p ../release/openwrt
+          tar -czf ../release/openwrt/thunder-onecloud-custom-rootfs.tar.gz -C files/ .
+          echo "✅ 打包完成：release/openwrt/thunder-onecloud-custom-rootfs.tar.gz"
 
       - name: 📤 Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-images
-          path: release/openwrt
+          name: thunder-onecloud-rootfs-custom
+          path: release/openwrt/
           if-no-files-found: warn
           compression-level: 6
+
+      - name: 🕒 Get Beijing Time
+        id: time
+        run: |
+          export TZ=Asia/Shanghai
+          echo "datetime=$(date '+%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
+
+      - name: 🚀 Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: always()
+        with:
+          tag_name: OneCloud-OpenWRT
+          name: "OneCloud OpenWRT 旁路由固件"
+          body: |
+            ✅ 玩客云 OneCloud OpenWRT 固件构建完成！
+            - 平台: amlogic/meson8b
+            - 内核: 6.6.110
+            - 基于 openwrt.ai 24.10.4
+            - 构建者: ${{ github.event.inputs.OP_author }}
+            - 构建时间（北京时间）: ${{ steps.time.outputs.datetime }}
+
+            固件文件:
+            ```
+            thunder-onecloud-custom-rootfs.tar.gz
+            ```
+          files: release/openwrt/**/*
+          overwrite_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
