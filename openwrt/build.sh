@@ -1,17 +1,27 @@
 #!/bin/bash
 set -e
 
-echo "🧩 检查 ImageBuilder 根目录..."
-for d in /builder /openwrt /home/build /home/openwrt /workdir /; do
+echo "🧩 自动检测 ImageBuilder 根目录..."
+CANDIDATES="/builder /openwrt /home/build /home/openwrt /workdir /source /"
+for d in $CANDIDATES; do
   if [ -f "$d/Makefile" ]; then
     cd "$d"
-    echo "✅ 已进入 ImageBuilder 根目录: $d"
+    echo "✅ 找到 Makefile: $d"
     break
   fi
 done
+
 if [ ! -f Makefile ]; then
-  echo "❌ ERROR: 未找到 Makefile，镜像结构不对"
-  exit 1
+  echo "⚙️ 尝试深度扫描..."
+  FOUND=$(find / -maxdepth 5 -type f -name Makefile 2>/dev/null | grep -E '/(openwrt|imagebuilder)' | head -n 1 || true)
+  if [ -n "$FOUND" ]; then
+    cd "$(dirname "$FOUND")"
+    echo "✅ 通过扫描找到 ImageBuilder 根目录: $(pwd)"
+  else
+    echo "❌ ERROR: 无法找到 ImageBuilder 根目录（Makefile 不存在）"
+    find / -maxdepth 3 -type f -name Makefile 2>/dev/null | head -n 30
+    exit 1
+  fi
 fi
 
 echo "🧩 生成 .config..."
@@ -83,6 +93,10 @@ DHCP
 echo "✅ 已配置旁路由：192.168.2.2 网关192.168.2.1 DHCP关"
 
 echo "🏗️ 开始构建镜像..."
-make image PROFILE=generic FILES=files
+make image PROFILE=generic FILES=files || {
+  echo "⚠️ make image 失败，尝试列出可能的 profile..."
+  make info | head -n 50
+  exit 1
+}
 
 echo "✅ 构建完成，固件位于 bin/targets/armsr/armv7/"
