@@ -46,7 +46,7 @@ DHCP
 echo "✅ 已配置为旁路由 (IP=192.168.2.2, 网关=192.168.2.1, DHCP=关闭)"
 
 # ============================================================
-# 🌐 添加 OpenClash 插件 需要增加插件可以在此再写代码即可
+# 🌐 添加 OpenClash 插件
 # ============================================================
 echo "🌐 下载并集成 OpenClash 插件..."
 mkdir -p files/tmp/openclash
@@ -92,6 +92,20 @@ echo "📦 挂载镜像并写入 rootfs..."
 sudo mkdir -p "$MNT_DIR"
 sudo mount -o loop "$IMG_FILE" "$MNT_DIR"
 sudo rsync -aHAX files/ "$MNT_DIR"/
+
+# ============================================================
+# 🔐 设置默认 root 密码为 “root”
+# ============================================================
+echo "🔐 设置默认 root 密码为 'root'..."
+echo "root:root" | sudo chroot "$MNT_DIR" chpasswd || echo "⚠️ 无法在 chroot 环境设置密码，将在镜像挂载时写入 shadow 文件。"
+
+# 如果 chroot 失败则直接修改 /etc/shadow
+if [ -f "$MNT_DIR/etc/shadow" ]; then
+  echo "🧩 手动写入 /etc/shadow..."
+  sed -i "s|^root:[^:]*:|root:\$1\$root\$jPp4oTg4l0jYkMxS2KZpF/:|" "$MNT_DIR/etc/shadow" || true
+else
+  echo "⚠️ 未找到 /etc/shadow，跳过密码设置。"
+fi
 
 sync
 sudo umount "$MNT_DIR"
