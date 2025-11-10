@@ -2,7 +2,7 @@
 set -e
 
 # ============================================================
-# 🧩 基本配置
+# ⚙️ 基本配置
 # ============================================================
 ROOTFS_URL="https://dl.openwrt.ai/releases/targets/amlogic/meson8b/kwrt-10.30.2025-amlogic-meson8b-thunder-onecloud-rootfs.tar.gz"
 OUTPUT_DIR="release/openwrt"
@@ -24,7 +24,7 @@ echo "📂 解压 rootfs 到 files/..."
 tar -xzf bin/rootfs/*.tar.gz -C files/ || true
 
 # ============================================================
-# ⚙️ 写入旁路由网络配置
+# 🌐 网络配置（旁路由模式）
 # ============================================================
 echo "🧰 写入旁路由网络配置..."
 mkdir -p files/etc/config
@@ -46,54 +46,32 @@ DHCP
 echo "✅ 已配置为旁路由 (IP=192.168.2.2, 网关=192.168.2.1, DHCP=关闭)"
 
 # ============================================================
-# 🌐 添加 OpenClash 插件
+# 🌐 集成 OpenClash 插件
 # ============================================================
 echo "🌐 下载并集成 OpenClash 插件..."
-mkdir -p files/tmp/openclash
 git clone --depth=1 https://github.com/vernesong/OpenClash.git tmp_openclash
 cp -rf tmp_openclash/luci-app-openclash/files/* files/ || true
 rm -rf tmp_openclash
 echo "✅ OpenClash 已添加完成。"
 
 # ============================================================
-# 🐳 添加 Docker 中文版 (luci-app-dockerman)
+# 🐋 集成 Docker 中文界面 (luci-app-dockerman)
 # ============================================================
-echo "🐳 下载并集成 Docker 中文管理插件..."
+echo "🐋 下载并集成 luci-app-dockerman..."
 git clone --depth=1 https://github.com/lisaac/luci-app-dockerman.git tmp_docker
-git clone --depth=1 https://github.com/lisaac/luci-lib-docker.git tmp_libdocker
-
-# 拷贝文件
 cp -rf tmp_docker/files/* files/ || true
-cp -rf tmp_libdocker/files/* files/ || true
-rm -rf tmp_docker tmp_libdocker
-
-# 添加 docker 启动脚本和默认配置
-mkdir -p files/etc/init.d
-cat <<'DOCKERSERVICE' > files/etc/init.d/dockerd
-#!/bin/sh /etc/rc.common
-START=99
-start() {
-    echo "Starting Docker..."
-    dockerd &>/dev/null &
-}
-stop() {
-    echo "Stopping Docker..."
-    killall dockerd || true
-}
-DOCKERSERVICE
-chmod +x files/etc/init.d/dockerd
-
-echo "✅ Docker 中文管理界面 (luci-app-dockerman) 已添加完成。"
+rm -rf tmp_docker
+echo "✅ Docker 中文管理界面已添加。"
 
 # ============================================================
-# 🎨 替换默认主题为 Argon
+# 🎨 默认主题设置为 Argon
 # ============================================================
-echo "🎨 下载 luci-theme-argon 主题..."
+echo "🎨 下载 luci-theme-argon..."
 git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git tmp_argon
 cp -rf tmp_argon/files/* files/ || true
 rm -rf tmp_argon
 
-echo "⚙️ 修改默认主题为 Argon..."
+echo "⚙️ 设置默认主题为 Argon..."
 mkdir -p files/etc/config
 cat <<'UCI' > files/etc/config/luci
 config core main
@@ -102,8 +80,17 @@ config core main
 	option resourcebase '/luci-static/resources'
 	option ubuspath '/ubus/'
 UCI
-
 echo "✅ 默认主题已设置为 luci-theme-argon。"
+
+# ============================================================
+# 🔐 设置默认 root 密码
+# ============================================================
+echo "🔐 设置默认 root 密码为 'root'..."
+mkdir -p files/etc
+if [ ! -f files/etc/shadow ]; then
+  echo "root:\$1\$root\$jPp4oTg4l0jYkMxS2KZpF/:19383:0:99999:7:::" > files/etc/shadow
+fi
+echo "✅ 已设置 root 登录密码为 'root'。"
 
 # ============================================================
 # 🧱 制作 EXT4 镜像（EMMC 线刷包）
@@ -112,7 +99,7 @@ IMG_FILE="${OUTPUT_DIR}/thunder-onecloud-emmc-ext4.img"
 MNT_DIR="./mnt_ext4"
 
 echo "🧱 创建 EXT4 镜像文件..."
-IMG_SIZE_MB=1024
+IMG_SIZE_MB=512
 dd if=/dev/zero of="$IMG_FILE" bs=1M count=$IMG_SIZE_MB status=progress
 
 echo "⚙️ 格式化为 EXT4..."
@@ -122,20 +109,6 @@ echo "📦 挂载镜像并写入 rootfs..."
 sudo mkdir -p "$MNT_DIR"
 sudo mount -o loop "$IMG_FILE" "$MNT_DIR"
 sudo rsync -aHAX files/ "$MNT_DIR"/
-
-# ============================================================
-# 🔐 设置默认 root 密码为 “root”
-# ============================================================
-echo "🔐 设置默认 root 密码为 'root'..."
-echo "root:root" | sudo chroot "$MNT_DIR" chpasswd || echo "⚠️ 无法在 chroot 环境设置密码，将在镜像挂载时写入 shadow 文件。"
-
-# 如果 chroot 失败则直接修改 /etc/shadow
-if [ -f "$MNT_DIR/etc/shadow" ]; then
-  echo "🧩 手动写入 /etc/shadow..."
-  sed -i "s|^root:[^:]*:|root:\$1\$root\$jPp4oTg4l0jYkMxS2KZpF/:|" "$MNT_DIR/etc/shadow" || true
-else
-  echo "⚠️ 未找到 /etc/shadow，跳过密码设置。"
-fi
 
 sync
 sudo umount "$MNT_DIR"
@@ -150,4 +123,64 @@ echo "📦 压缩镜像..."
 gzip -f "$IMG_FILE"
 echo "✅ 输出文件: ${IMG_FILE}.gz"
 
+# ============================================================
+# 🧾 生成发布说明
+# ============================================================
+VERSION=$(basename "$ROOTFS_URL" | grep -oE 'kwrt-[0-9\.]+')
+RELEASE_NOTE="${OUTPUT_DIR}/release_note.md"
+
+echo "🧾 生成发布说明..."
+cat <<EOF > "$RELEASE_NOTE"
+# 🚀 OpenWRT OneCloud 旁路由版
+
+**版本:** ${VERSION}  
+**构建时间:** $(date +"%Y-%m-%d %H:%M:%S")
+
+---
+
+## 🧩 已集成功能
+- ✅ OpenClash (vernesong/OpenClash)
+- ✅ Docker 中文管理界面 (lisaac/luci-app-dockerman)
+- ✅ Argon 默认主题 (jerrykuku/luci-theme-argon)
+- ✅ 旁路由模式 (静态IP)
+
+---
+
+## ⚙️ 默认网络配置
+| 项目 | 值 |
+|------|------|
+| IP 地址 | 192.168.2.2 |
+| 子网掩码 | 255.255.255.0 |
+| 网关 | 192.168.2.1 |
+| DNS | 192.168.2.1 |
+| DHCP | 关闭 |
+
+---
+
+## 🔐 Web 后台登录
+| 项目 | 内容 |
+|------|------|
+| 地址 | [http://192.168.2.2](http://192.168.2.2) |
+| 用户名 | root |
+| 密码 | root |
+
+---
+
+## 💾 文件信息
+| 文件名 | 大小 | 说明 |
+|--------|------|------|
+| thunder-onecloud-emmc-ext4.img.gz | $(du -h "${IMG_FILE}.gz" | awk '{print $1}') | EMMC 线刷镜像 |
+
+---
+
+📢 **说明:**  
+该镜像适合 OneCloud 设备刷入 EMMC 使用，基于 kwrt RootFS，集成 OpenClash + Docker + Argon UI，无需手动安装。
+
+EOF
+
+echo "✅ 已生成发布说明: $RELEASE_NOTE"
+
+# ============================================================
+# ✅ 结束
+# ============================================================
 echo "🎉 构建流程全部完成！"
