@@ -1,7 +1,6 @@
 name: N1 OpenWRT RootFS Custom Build
 
 on:
-  # ✅ 手动触发
   workflow_dispatch:
     inputs:
       OP_author:
@@ -9,55 +8,43 @@ on:
         required: false
         default: 'GitHub Actions'
 
-  # ✅ 每 15 天自动触发（北京时间凌晨 3:00）
   schedule:
-    - cron: '0 19 */15 * *'  # UTC+0 时间 = 北京时间 +8 小时
-
-# 🚫 不会因 push/pull_request 或脚本修改触发
-# 如果将来想启用自动触发，可取消注释以下内容：
-#   push:
-#     paths-ignore:
-#       - '.github/workflows/**'
-#       - 'openwrt/*.sh'
-#   pull_request:
-#     paths-ignore:
-#       - '.github/workflows/**'
-#       - 'openwrt/*.sh'
+    # 每 15 天执行一次（UTC 时间）。这是北京时间凌晨 03:00。
+    - cron: '0 19 */15 * *'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
-      - name: 🧾 Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🧱 Prepare directories
+      - name: Prepare directories
         run: |
           mkdir -p openwrt/bin openwrt/files release/openwrt
-          sudo chmod -R 777 openwrt/bin openwrt/files release/openwrt
+          chmod -R 777 openwrt/bin openwrt/files release/openwrt || true
 
-      - name: 📥 Download prebuilt rootfs
-        working-directory: openwrt
+      - name: Download prebuilt rootfs
         run: |
-          echo "📥 下载预构建 rootfs 文件..."
+          set -e
+          echo "Download rootfs..."
           ROOTFS_URL="https://dl.openwrt.ai/releases/targets/amlogic/meson8b/kwrt-10.30.2025-amlogic-meson8b-thunder-onecloud-rootfs.tar.gz"
-          mkdir -p bin/rootfs
-          cd bin/rootfs
-          curl -LO "$ROOTFS_URL"
-          echo "✅ 下载完成：$(ls -lh)"
+          mkdir -p openwrt/bin/rootfs
+          curl -fsSL "$ROOTFS_URL" -o openwrt/bin/rootfs/rootfs.tar.gz
+          echo "Downloaded:" && ls -lh openwrt/bin/rootfs
 
-      - name: 📂 Extract rootfs and apply configs
-        working-directory: openwrt
+      - name: Extract rootfs and apply configs
         run: |
-          echo "📂 解压 rootfs..."
-          mkdir -p files/
-          tar -xzf bin/rootfs/*.tar.gz -C files/ || true
+          set -e
+          echo "Extracting..."
+          mkdir -p openwrt/files
+          tar -xzf openwrt/bin/rootfs/rootfs.tar.gz -C openwrt/files || true
 
-          echo "🧰 写入旁路由网络配置..."
-          mkdir -p files/etc/config
-
-          cat <<'NETCONF' > files/etc/config/network
+          echo "Writing network config..."
+          mkdir -p openwrt/files/etc/config
+          cat > openwrt/files/etc/config/network <<'NETCONF'
 config interface 'lan'
   option proto 'static'
   option ipaddr '192.168.2.2'
@@ -66,22 +53,22 @@ config interface 'lan'
   option dns '192.168.2.1'
 NETCONF
 
-          cat <<'DHCP' > files/etc/config/dhcp
+          cat > openwrt/files/etc/config/dhcp <<'DHCP'
 config dhcp 'lan'
   option ignore '1'
 DHCP
 
-          echo "✅ 覆盖配置完成。"
+          echo "Files prepared at openwrt/files"
 
-      - name: 🔧 Package customized firmware
-        working-directory: openwrt
+      - name: Package customized firmware
         run: |
-          echo "🔧 打包固件..."
-          mkdir -p ../release/openwrt
-          tar -czf ../release/openwrt/thunder-onecloud-custom-rootfs.tar.gz -C files/ .
-          echo "✅ 打包完成：release/openwrt/thunder-onecloud-custom-rootfs.tar.gz"
+          set -e
+          mkdir -p release/openwrt
+          tar -czf release/openwrt/thunder-onecloud-custom-rootfs.tar.gz -C openwrt/files .
+          echo "Packaged: release/openwrt/thunder-onecloud-custom-rootfs.tar.gz"
+          ls -lh release/openwrt
 
-      - name: 📤 Upload build artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: thunder-onecloud-rootfs-custom
@@ -89,32 +76,28 @@ DHCP
           if-no-files-found: warn
           compression-level: 6
 
-      - name: 🕒 Get Beijing Time
+      - name: Get Beijing Time
         id: time
         run: |
           export TZ=Asia/Shanghai
           echo "datetime=$(date '+%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
 
-      - name: 🚀 Publish to GitHub Release
+      - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         if: always()
         with:
-          tag_name: OneCloud-OpenWRT
-          name: "OneCloud OpenWRT 旁路由固件"
+          tag_name: "OneCloud-OpenWRT-${{ steps.time.outputs.datetime }}"
+          name: "OneCloud OpenWRT 旁路由固件 - ${{ steps.time.outputs.datetime }}"
           body: |
-            ✅ 玩客云 OneCloud OpenWRT 固件构建完成！
+            玩客云 OneCloud OpenWRT 固件构建完成！
             - 平台: amlogic/meson8b
-            - 内核: 6.6.110
             - 基于 openwrt.ai 24.10.4
             - 构建者: ${{ github.event.inputs.OP_author }}
             - 构建时间（北京时间）: ${{ steps.time.outputs.datetime }}
 
-            固件文件:
-            ```
-            thunder-onecloud-custom-rootfs.tar.gz
-            ```
+            包含文件:
+            - thunder-onecloud-custom-rootfs.tar.gz
           files: release/openwrt/**/*
           overwrite_files: true
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
