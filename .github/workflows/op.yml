@@ -1,9 +1,9 @@
-name: OpenWRT 自动构建
+name: OpenWRT 自动构建线刷镜像
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 20 * * *'
+    - cron: '0 20 * * *'  # 每天北京时间早上4点
 
 jobs:
   build:
@@ -13,7 +13,7 @@ jobs:
       - name: 🧰 检出仓库代码
         uses: actions/checkout@v4
 
-      - name: 🔧 修正脚本权限与换行符
+      - name: 🔧 修正权限与换行符
         run: |
           sudo apt-get update
           sudo apt-get install -y dos2unix
@@ -27,20 +27,31 @@ jobs:
           OP_rootfs: 512
         run: bash ./docker-build.sh
 
-      - name: 📦 上传构建产物
+      - name: 📦 上传 EMMC 线刷镜像
         uses: actions/upload-artifact@v4
         with:
-          name: thunder-onecloud-rootfs
-          path: openwrt/release/openwrt/thunder-onecloud-custom-rootfs.tar.gz
+          name: thunder-onecloud-emmc-ext4-img
+          path: openwrt/release/openwrt/thunder-onecloud-emmc-ext4.img.gz
 
-      - name: 🚀 发布 Release（手动触发时）
-        if: github.event_name == 'workflow_dispatch'
+      # 🧹 删除旧的 Release 和 Tag，保持最新版本
+      - name: 🧹 清理旧的 Releases（仅保留最新1个）
+        uses: dev-drprasad/delete-older-releases@v0.3.3
+        with:
+          keep_latest: 1
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🚀 发布最新线刷镜像
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "build-${{ github.run_number }}"
-          name: "OpenWRT 自动构建 #${{ github.run_number }}"
-          body: "这是自动构建并打包的 rootfs 固件。"
+          tag_name: "latest"
+          name: "OpenWRT 最新线刷镜像"
+          body: |
+            🔄 自动构建时间：${{ github.run_started_at }}
+            ✅ 固件类型：EMMC 线刷镜像（EXT4）
+            ⚙️ 仅保留最新构建版本
           files: |
-            openwrt/release/openwrt/thunder-onecloud-custom-rootfs.tar.gz
+            openwrt/release/openwrt/thunder-onecloud-emmc-ext4.img.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
